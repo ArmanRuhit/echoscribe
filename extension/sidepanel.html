@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EchoScribe</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin: 0;
+            padding: 16px;
+            font: 14px/1.45 system-ui, sans-serif;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        #status {
+            margin: 0 0 8px;
+            font-size: 12px;
+            opacity: 0.72;
+            overflow-wrap: anywhere;
+        }
+
+        #transcript {
+            display: flex;
+            flex: 1;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+        }
+
+        .segment {
+            margin: 0;
+        }
+
+        .time {
+            margin-right: 6px;
+            font-size: 11px;
+            font-variant-numeric: tabular-nums;
+            opacity: 0.6;
+        }
+
+        .empty {
+            margin: 0;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+    <h1>EchoScribe</h1>
+    <p id="status">Idle</p>
+    <div id="transcript" role="log" aria-live="polite">
+        <p class="empty">Start a lecture, then click the EchoScribe icon.</p>
+    </div>
+    <script src="sidepanel.js"></script>
+</body>
+</html>

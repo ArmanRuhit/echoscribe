@@ -1,0 +1,4 @@
+faster-whisper==1.2.1
+websockets==17.3
+numpy>=2.0
+av>=16.1,<17
