@@ -4,11 +4,11 @@ Personal Chrome/Brave extension that live-transcribes the audio of a course vide
 
 Audio is captured only as temporary input. It is never saved.
 
-Status: Steps 1-5 implemented. Hardening is in place; the 30-minute real-lecture test is pending.
+Status: Steps 1-5 implemented, plus Hindi, GPU, and video-clock support. A 30-minute Hinglish lecture on `large-v3`/cuda produced a usable transcript: real-time video timestamps, one replay block, two gaps over 30 s, no lost lines.
 
 ## Next action
 
-Run a 30-minute lecture test, then review and push the first commit.
+Replay a rewind on a real lecture and confirm every marked line names the same origin (fixed in `7cbe6c2`). Then the open quickstart scenarios in `specs/003-video-time-sync/tasks.md` (T014, T017, T020, T023).
 
 ## Skills
 
@@ -143,19 +143,19 @@ One step per turn. Do not start the next step until the test passes.
 
 ## Test checklist
 
-- [ ] One-minute lecture produces a transcript file with timestamps.
-- [ ] File updates while the lecture is still playing.
-- [ ] Lecture audio stays audible during capture.
-- [ ] Stop finalizes the file and clears the badge.
-- [ ] No audio file is created.
+- [x] One-minute lecture produces a transcript file with timestamps.
+- [x] File updates while the lecture is still playing.
+- [x] Lecture audio stays audible during capture.
+- [x] Stop finalizes the file and clears the badge.
+- [x] No audio file is created.
 - [ ] Start and stop work twice without reloading the extension.
 - [ ] Server disconnect shows `ERR`; no silent failure.
-- [ ] Hindi with `ECHOSCRIBE_MODEL=small` writes Devanagari, no replacement characters.
-- [ ] Hindi selected with `small.en` shows `ERR` and creates no file.
-- [ ] `ECHOSCRIBE_DEVICE=cuda` prints `[verify] 1.0 s ok` and the header records `device cuda/float16`.
-- [ ] A missing CUDA library exits with the library name and serves nothing.
-- [ ] Capture started at 12:30 writes `[00:12:30]` and the header says `Clock: video`.
-- [ ] A 10 s rewind marks the next lines `(replay from HH:MM:SS)`.
+- [x] Hindi with `ECHOSCRIBE_MODEL=small` writes Devanagari, no replacement characters.
+- [x] Hindi selected with `small.en` shows `ERR` and creates no file.
+- [x] `ECHOSCRIBE_DEVICE=cuda` prints `[verify] 1.0 s ok` and the header records `device cuda/float16`.
+- [x] A missing CUDA library exits with the library name and serves nothing.
+- [x] Capture started at 12:30 writes `[00:12:30]` and the header says `Clock: video`.
+- [x] A 10 s rewind marks the next lines `(replay from HH:MM:SS)`. Origin freeze verified in the harness, not yet on a live rewind.
 
 ## Commands
 
