@@ -9,3 +9,8 @@ models/
 *.wav
 *.webm
 .DS_Store
+
+# Local tooling state; never shared.
+.specify/feature.json
+*.log
+.env
