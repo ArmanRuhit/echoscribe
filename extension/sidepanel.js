@@ -7,6 +7,8 @@ const LANGUAGES = { en: "English", hi: "Hindi" };
 const LANGUAGE_KEY = "language";
 let sessionLanguage = "";
 let sessionModel = "";
+let sessionDevice = "";
+let sessionCompute = "";
 
 void restoreLanguage();
 
@@ -44,9 +46,11 @@ chrome.runtime.onMessage.addListener((message) => {
     }
 });
 
-function setStatus({ state, title, message, language, model }) {
+function setStatus({ state, title, message, language, model, device, compute }) {
     if (language) sessionLanguage = language;
     if (model) sessionModel = model;
+    if (device) sessionDevice = device;
+    if (compute) sessionCompute = compute;
 
     if (state === "recording") {
         statusEl.textContent = recordingLabel(title);
@@ -56,10 +60,14 @@ function setStatus({ state, title, message, language, model }) {
         statusEl.textContent = `Error: ${message || "capture stopped"}`;
         sessionLanguage = "";
         sessionModel = "";
+        sessionDevice = "";
+        sessionCompute = "";
     } else {
         statusEl.textContent = "Stopped";
         sessionLanguage = "";
         sessionModel = "";
+        sessionDevice = "";
+        sessionCompute = "";
     }
 }
 
@@ -75,7 +83,9 @@ function recordingLabel(title) {
         }`;
     }
 
-    return `Recording · ${LANGUAGES[sessionLanguage] || sessionLanguage} · ${sessionModel}`;
+    const suffix =
+        sessionDevice === "cuda" && sessionCompute ? ` · GPU ${sessionCompute}` : "";
+    return `Recording · ${LANGUAGES[sessionLanguage] || sessionLanguage} · ${sessionModel}${suffix}`;
 }
 
 function appendSegment(start, text) {

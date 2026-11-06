@@ -6,5 +6,7 @@ dependencies = [
     "av>=16.1,<17",
     "faster-whisper==1.2.1",
     "numpy>=2.0",
+    "nvidia-cublas-cu12>=12.8,<13 ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "nvidia-cudnn-cu12>=9,<10 ; platform_machine == 'x86_64' and sys_platform == 'linux'",
     "websockets==17.3",
 ]

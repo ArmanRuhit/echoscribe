@@ -78,7 +78,7 @@ Pipeline:
 8. The server buffers ~5-second windows, transcribes with `faster-whisper`, appends text to Markdown, and sends each segment back.
 9. The side panel appends the segment. Stop closes the socket, tracks, context, and offscreen document; the server finalizes the file.
 
-Latency: about 2 to 5 seconds behind the speaker, depending on model and CPU. This is near-live, not word-by-word captions.
+Latency: about 2 to 5 seconds behind the speaker on CPU. A GPU keeps up with real time, so the lag stops growing. This is near-live, not word-by-word captions.
 
 Protocol:
 
@@ -87,12 +87,14 @@ client -> server: {"type":"start","sessionId":"...","title":"...","url":"...","s
 client -> server: binary Int16 mono PCM frames
 client -> server: {"type":"stop"}
 
-server -> client: {"type":"ready","model":"small","language":"hi","sessionId":"...","resumed":false}
+server -> client: {"type":"ready","model":"small","language":"hi","device":"cuda","compute":"float16","sessionId":"...","resumed":false}
 server -> client: {"type":"segment","start":12.3,"end":16.8,"text":"..."}
 server -> client: {"type":"error","code":"unsupported_language","message":"..."}
 ```
 
 Language: chosen per session in the side panel (`en` or `hi`). The server validates it before opening a file and refuses a non-English language when the model name ends in `.en`, so a mismatch never produces a transcript.
+
+Device: chosen at server start. `ECHOSCRIBE_DEVICE=cuda` loads the model, transcribes 1 s of silence, and only then binds the port. A missing CUDA library, absent GPU, bad precision, or out of memory exits with a named cause; it never falls back to CPU. Any transcription failure mid-session sends `{"code":"transcription_failed"}`, marks the session failed, and keeps the file written so far.
 
 Transcript file: `~/EchoScribe/transcripts/YYYY-MM-DD_HH-MM_<slug>.md`. Header plus `[HH:MM:SS] text`, flushed after every segment.
 
@@ -143,6 +145,8 @@ One step per turn. Do not start the next step until the test passes.
 - [ ] Server disconnect shows `ERR`; no silent failure.
 - [ ] Hindi with `ECHOSCRIBE_MODEL=small` writes Devanagari, no replacement characters.
 - [ ] Hindi selected with `small.en` shows `ERR` and creates no file.
+- [ ] `ECHOSCRIBE_DEVICE=cuda` prints `[verify] 1.0 s ok` and the header records `device cuda/float16`.
+- [ ] A missing CUDA library exits with the library name and serves nothing.
 
 ## Commands
 
@@ -181,8 +185,8 @@ Config:
 - Copy `.env.example` to `.env`; the server loads it at startup and shell variables win
 - `ECHOSCRIBE_MODEL` default `small.en`; use `base.en` for speed or `small`/`medium` for multilingual
 - `ECHOSCRIBE_LANGUAGE` default `en`; the panel selection overrides it; `auto` for Bangla or mixed lectures
-- `ECHOSCRIBE_DEVICE` default `cpu`; use `cuda` with a supported GPU
-- `ECHOSCRIBE_COMPUTE` default `int8` on CPU; use `float16` on GPU
+- `ECHOSCRIBE_DEVICE` default `cpu`; `cuda` needs the CUDA 12 wheels that `server/requirements.txt` installs on linux/x86_64 (≈2.1 GB on disk)
+- `ECHOSCRIBE_COMPUTE` default `int8` on CPU and `float16` on GPU; leave unset so it follows the device
 - `ECHOSCRIBE_DIR` default `~/EchoScribe`
 - `ECHOSCRIBE_PORT` default `8765`
 

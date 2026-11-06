@@ -2,3 +2,7 @@ faster-whisper==1.2.1
 websockets==17.3
 numpy>=2.0
 av>=16.1,<17
+
+# CUDA 12 runtime for `ECHOSCRIBE_DEVICE=cuda`; faster-whisper/ct2 dlopens these.
+nvidia-cublas-cu12>=12.8,<13; sys_platform == "linux" and platform_machine == "x86_64"
+nvidia-cudnn-cu12>=9,<10; sys_platform == "linux" and platform_machine == "x86_64"

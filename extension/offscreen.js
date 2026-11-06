@@ -12,6 +12,8 @@ let sessionTitle = "";
 let sessionUrl = "";
 let sessionLanguage = "en";
 let sessionModel = "";
+let sessionDevice = "";
+let sessionCompute = "";
 let readySeen = false;
 let droppedFrames = 0;
 const pending = [];
@@ -40,6 +42,8 @@ async function start({ streamId, title, url, language }) {
     sessionUrl = url;
     sessionLanguage = language || "en";
     sessionModel = "";
+    sessionDevice = "";
+    sessionCompute = "";
     stopping = false;
     readySeen = false;
     reconnectDelay = 1000;
@@ -122,6 +126,8 @@ function connectSocket() {
             reconnectDelay = 1000;
             sessionLanguage = data.language || sessionLanguage;
             sessionModel = data.model || "";
+            sessionDevice = data.device || "";
+            sessionCompute = data.compute || "";
             try {
                 await attachWorklet();
             } catch (error) {
@@ -136,25 +142,25 @@ function connectSocket() {
                 state: "recording",
                 title: sessionTitle,
                 language: sessionLanguage,
-                model: sessionModel
+                model: sessionModel,
+                device: sessionDevice,
+                compute: sessionCompute
             });
             console.log(
                 "EchoScribe server ready:",
                 sessionModel,
+                sessionDevice,
                 data.resumed ? "(resumed)" : ""
             );
         } else if (data.type === "segment") {
             console.log(`[${data.start.toFixed(1)}s] ${data.text}`);
             sendPanel({ type: "SEGMENT", start: data.start, text: data.text });
         } else if (data.type === "error") {
-            if (!readySeen) {
-                await stop({
-                    type: "ERROR",
-                    message: data.message || "server refused the session"
-                });
-                return;
-            }
-            console.error("EchoScribe server error:", data.message);
+            // After ready the only error is a failed transcription: the session is dead.
+            await stop({
+                type: "ERROR",
+                message: data.message || "server error"
+            });
         }
     });
 
@@ -185,7 +191,9 @@ function scheduleReconnect() {
         state: "reconnecting",
         title: sessionTitle,
         language: sessionLanguage,
-        model: sessionModel
+        model: sessionModel,
+        device: sessionDevice,
+        compute: sessionCompute
     });
     console.warn(`EchoScribe server offline; retrying in ${reconnectDelay}ms`);
 
