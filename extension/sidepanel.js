@@ -43,7 +43,7 @@ chrome.runtime.onMessage.addListener((message) => {
     if (message.type === "STATUS") {
         setStatus(message);
     } else if (message.type === "SEGMENT") {
-        appendSegment(message.start, message.text);
+        appendSegment(message.start, message.text, message.replayFrom);
     }
 });
 
@@ -98,7 +98,7 @@ function recordingLabel(title) {
     return `Recording · ${LANGUAGES[sessionLanguage] || sessionLanguage} · ${sessionModel}${suffix}${clock}`;
 }
 
-function appendSegment(start, text) {
+function appendSegment(start, text, replayFrom) {
     if (!text) return;
 
     if (emptyEl) {
@@ -120,7 +120,14 @@ function appendSegment(start, text) {
     if (sessionLanguage) body.lang = sessionLanguage;
     body.textContent = text;
 
-    row.append(time, body);
+    row.append(time);
+    if (replayFrom != null) {
+        const replay = document.createElement("span");
+        replay.className = "replay";
+        replay.textContent = `(replay from ${formatTime(replayFrom)}) `;
+        row.append(replay);
+    }
+    row.append(body);
     transcriptEl.append(row);
 
     if (atBottom) {
