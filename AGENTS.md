@@ -150,7 +150,7 @@ uv pip install -r server/requirements.txt
 uv run python server/transcribe_server.py
 ```
 
-`uv run` uses the project `.venv`; no activation needed.
+`uv run` uses the project `.venv`; no activation needed. Dependencies also live in `pyproject.toml` (which `uv.lock` pins), so `uv run` does not prune them; after editing `server/requirements.txt`, run `uv add -r server/requirements.txt`.
 
 Dependency note: pin `av>=16.1,<17`. PyAV 19 removed `metadata_errors`, but `faster-whisper` 1.2.1 still passes it. `av` 16.1.0 is the newest release with standard Python 3.14 wheels.
 
