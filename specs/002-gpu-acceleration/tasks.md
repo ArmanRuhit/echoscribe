@@ -172,3 +172,9 @@ real commit should include them even though the MVP checklist stops at US1.
 - T002, T008, T013, T018, T020, T023 need a browser and a real lecture; they cannot run headless
 - Model cache is `HF_HOME=/desk/models/hf`; a model switch re-downloads
 - The first uncached GPU call takes ~25 s building the CUDA JIT cache; do not mistake it for a hang
+
+## Phase 8: Convergence
+
+- [X] T025 Show the active device in the side-panel status for CPU sessions (`· CPU`), not only GPU, per FR-008 (partial)
+- [ ] T026 Run a 30-minute GPU lecture and record timing and gap evidence for SC-001, SC-002, and SC-003 per SC-001 (partial)
+- [X] T027 Give the transcript-quality heuristics (silence/loop filter, fragment merge, `ECHOSCRIBE_PROMPT`) a spec or an AGENTS.md section, or remove them per plan: scope (unrequested)

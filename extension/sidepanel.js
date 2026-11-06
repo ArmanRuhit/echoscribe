@@ -84,7 +84,11 @@ function recordingLabel(title) {
     }
 
     const suffix =
-        sessionDevice === "cuda" && sessionCompute ? ` · GPU ${sessionCompute}` : "";
+        sessionDevice === "cuda" && sessionCompute
+            ? ` · GPU ${sessionCompute}`
+            : sessionDevice
+              ? " · CPU"
+              : "";
     return `Recording · ${LANGUAGES[sessionLanguage] || sessionLanguage} · ${sessionModel}${suffix}`;
 }
 

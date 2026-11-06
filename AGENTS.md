@@ -96,6 +96,8 @@ Language: chosen per session in the side panel (`en` or `hi`). The server valida
 
 Device: chosen at server start. `ECHOSCRIBE_DEVICE=cuda` loads the model, transcribes 1 s of silence, and only then binds the port. A missing CUDA library, absent GPU, bad precision, or out of memory exits with a named cause; it never falls back to CPU. Any transcription failure mid-session sends `{"code":"transcription_failed"}`, marks the session failed, and keeps the file written so far.
 
+Transcript quality: a segment is dropped when `no_speech_prob > 0.6` and `avg_logprob < -0.5`, when `compression_ratio > 2.4`, or when a single word fills 60% of a line of 3+ words. Identical consecutive segments are dropped, timestamps never move backwards, and segments split by a pause under 0.6 s merge into one line. `ECHOSCRIBE_PROMPT` biases decoding toward domain words.
+
 Transcript file: `~/EchoScribe/transcripts/YYYY-MM-DD_HH-MM_<slug>.md`. Header plus `[HH:MM:SS] text`, flushed after every segment.
 
 Reconnect: the client reuses `sessionId`; the server keeps the session for 10 minutes and appends to the same file. Audio during a disconnect queues for up to 30 seconds; older frames drop first.
