@@ -1,4 +1,16 @@
 const OFFSCREEN_URL = "offscreen.html";
+const LANGUAGE_KEY = "language";
+const LANGUAGES = ["en", "hi"];
+
+// session storage survives the service worker being evicted between selection and click.
+async function readLanguage() {
+    try {
+        const stored = await chrome.storage.session.get(LANGUAGE_KEY);
+        return LANGUAGES.includes(stored[LANGUAGE_KEY]) ? stored[LANGUAGE_KEY] : "en";
+    } catch {
+        return "en";
+    }
+}
 
 async function clearSession(badge = "") {
     await chrome.action.setBadgeText({ text: badge });
@@ -50,7 +62,8 @@ chrome.action.onClicked.addListener(async (tab) => {
             type: "START",
             streamId,
             title: tab.title || "Lecture",
-            url: tab.url || ""
+            url: tab.url || "",
+            language: await readLanguage()
         });
 
         await chrome.action.setBadgeBackgroundColor({ color: "#c62828" });

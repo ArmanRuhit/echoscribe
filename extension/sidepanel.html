@@ -24,7 +24,19 @@
             gap: 8px;
             margin: 0;
             padding: 16px;
-            font: 14px/1.45 system-ui, sans-serif;
+            font: 14px/1.45 system-ui, "Noto Sans Devanagari", "Nirmala UI", sans-serif;
+        }
+
+        #language-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        #language {
+            font: inherit;
+            padding: 2px 4px;
         }
 
         h1 {
@@ -66,6 +78,13 @@
 </head>
 <body>
     <h1>EchoScribe</h1>
+    <label id="language-row">
+        Language
+        <select id="language">
+            <option value="en" selected>English</option>
+            <option value="hi">Hindi</option>
+        </select>
+    </label>
     <p id="status">Idle</p>
     <div id="transcript" role="log" aria-live="polite">
         <p class="empty">Start a lecture, then click the EchoScribe icon.</p>

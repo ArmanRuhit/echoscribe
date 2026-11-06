@@ -10,6 +10,9 @@ let reconnectDelay = 1000;
 let sessionId = "";
 let sessionTitle = "";
 let sessionUrl = "";
+let sessionLanguage = "en";
+let sessionModel = "";
+let readySeen = false;
 let droppedFrames = 0;
 const pending = [];
 const MAX_PENDING = 300;
@@ -31,11 +34,14 @@ chrome.runtime.onMessage.addListener((message) => {
     }
 });
 
-async function start({ streamId, title, url }) {
+async function start({ streamId, title, url, language }) {
     sessionId = crypto.randomUUID();
     sessionTitle = title;
     sessionUrl = url;
+    sessionLanguage = language || "en";
+    sessionModel = "";
     stopping = false;
+    readySeen = false;
     reconnectDelay = 1000;
     droppedFrames = 0;
     pending.length = 0;
@@ -51,11 +57,25 @@ async function start({ streamId, title, url }) {
     });
 
     audioContext = new AudioContext({ sampleRate: 16000 });
-    await audioContext.audioWorklet.addModule("pcm-worklet.js");
     await audioContext.resume();
 
     source = audioContext.createMediaStreamSource(stream);
     source.connect(audioContext.destination); // keep the lecture audible
+
+    const track = stream.getAudioTracks()[0];
+    track.addEventListener("ended", () => {
+        void stop({ type: "ENDED", message: "Tab audio ended" });
+    });
+
+    connectSocket();
+    console.log("EchoScribe capture started");
+}
+
+// Attached only after ready: a refused language must never produce PCM.
+async function attachWorklet() {
+    if (worklet || !audioContext || !source) return;
+
+    await audioContext.audioWorklet.addModule("pcm-worklet.js");
 
     worklet = new AudioWorkletNode(audioContext, "pcm-worklet", {
         numberOfInputs: 1,
@@ -68,15 +88,6 @@ async function start({ streamId, title, url }) {
     source.connect(worklet);
     worklet.connect(mute).connect(audioContext.destination);
     worklet.port.onmessage = (event) => sendPcm(event.data);
-
-    const track = stream.getAudioTracks()[0];
-    track.addEventListener("ended", () => {
-        void stop({ type: "ENDED", message: "Tab audio ended" });
-    });
-
-    connectSocket();
-    sendPanel({ type: "STATUS", state: "recording", title });
-    console.log("EchoScribe capture started");
 }
 
 function connectSocket() {
@@ -90,15 +101,15 @@ function connectSocket() {
                 sessionId,
                 title: sessionTitle,
                 url: sessionUrl,
-                sampleRate: 16000
+                sampleRate: 16000,
+                language: sessionLanguage
             })
         );
         for (const chunk of pending.splice(0)) socket.send(chunk);
-        sendPanel({ type: "STATUS", state: "recording", title: sessionTitle });
         console.log("EchoScribe server connected");
     });
 
-    socket.addEventListener("message", (event) => {
+    socket.addEventListener("message", async (event) => {
         let data;
         try {
             data = JSON.parse(event.data);
@@ -107,27 +118,61 @@ function connectSocket() {
         }
 
         if (data.type === "ready") {
+            readySeen = true;
             reconnectDelay = 1000;
+            sessionLanguage = data.language || sessionLanguage;
+            sessionModel = data.model || "";
+            try {
+                await attachWorklet();
+            } catch (error) {
+                await stop({
+                    type: "ERROR",
+                    message: `Audio worklet failed: ${error.message}`
+                });
+                return;
+            }
+            sendPanel({
+                type: "STATUS",
+                state: "recording",
+                title: sessionTitle,
+                language: sessionLanguage,
+                model: sessionModel
+            });
             console.log(
                 "EchoScribe server ready:",
-                data.model,
+                sessionModel,
                 data.resumed ? "(resumed)" : ""
             );
         } else if (data.type === "segment") {
             console.log(`[${data.start.toFixed(1)}s] ${data.text}`);
             sendPanel({ type: "SEGMENT", start: data.start, text: data.text });
         } else if (data.type === "error") {
+            if (!readySeen) {
+                await stop({
+                    type: "ERROR",
+                    message: data.message || "server refused the session"
+                });
+                return;
+            }
             console.error("EchoScribe server error:", data.message);
         }
     });
 
     socket.addEventListener("close", () => {
         socketOpen = false;
+        if (!readySeen) {
+            void stop({
+                type: "ERROR",
+                message: "Server unreachable at ws://127.0.0.1:8765"
+            });
+            return;
+        }
         scheduleReconnect();
     });
 
     socket.addEventListener("error", () => {
-        scheduleReconnect();
+        // close follows; an initial failure is reported there.
+        if (readySeen) scheduleReconnect();
     });
 }
 
@@ -135,7 +180,13 @@ function scheduleReconnect() {
     if (stopping || reconnectTimer) return;
     if (socket && socket.readyState !== WebSocket.CLOSED) return;
 
-    sendPanel({ type: "STATUS", state: "reconnecting", title: sessionTitle });
+    sendPanel({
+        type: "STATUS",
+        state: "reconnecting",
+        title: sessionTitle,
+        language: sessionLanguage,
+        model: sessionModel
+    });
     console.warn(`EchoScribe server offline; retrying in ${reconnectDelay}ms`);
 
     reconnectTimer = setTimeout(() => {
@@ -200,6 +251,11 @@ async function stop(reason = {}) {
             // already closed
         }
     }
+
+    worklet = null;
+    source = null;
+    audioContext = null;
+    stream = null;
 
     const isError = reason.type === "ERROR";
     const message = isError

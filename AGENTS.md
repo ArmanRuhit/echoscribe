@@ -83,14 +83,16 @@ Latency: about 2 to 5 seconds behind the speaker, depending on model and CPU. Th
 Protocol:
 
 ```text
-client -> server: {"type":"start","sessionId":"...","title":"...","url":"...","sampleRate":16000}
+client -> server: {"type":"start","sessionId":"...","title":"...","url":"...","sampleRate":16000,"language":"hi"}
 client -> server: binary Int16 mono PCM frames
 client -> server: {"type":"stop"}
 
-server -> client: {"type":"ready","model":"small.en","sessionId":"...","resumed":false}
+server -> client: {"type":"ready","model":"small","language":"hi","sessionId":"...","resumed":false}
 server -> client: {"type":"segment","start":12.3,"end":16.8,"text":"..."}
-server -> client: {"type":"error","message":"..."}
+server -> client: {"type":"error","code":"unsupported_language","message":"..."}
 ```
+
+Language: chosen per session in the side panel (`en` or `hi`). The server validates it before opening a file and refuses a non-English language when the model name ends in `.en`, so a mismatch never produces a transcript.
 
 Transcript file: `~/EchoScribe/transcripts/YYYY-MM-DD_HH-MM_<slug>.md`. Header plus `[HH:MM:SS] text`, flushed after every segment.
 
@@ -111,8 +113,9 @@ Permissions:
 - Step 1: `activeTab` only.
 - Step 3: add `tabCapture` and `offscreen`.
 - Step 4: add `sidePanel`.
+- Hindi: add `storage`; only `chrome.storage.session` is used, so the choice never touches disk.
 - Add `content_security_policy.extension_pages` with `connect-src ws://127.0.0.1:8765`.
-- No `downloads`, `storage`, or broad host permissions unless a step needs them.
+- No `downloads` or broad host permissions.
 
 ## Build order
 
@@ -138,6 +141,8 @@ One step per turn. Do not start the next step until the test passes.
 - [ ] No audio file is created.
 - [ ] Start and stop work twice without reloading the extension.
 - [ ] Server disconnect shows `ERR`; no silent failure.
+- [ ] Hindi with `ECHOSCRIBE_MODEL=small` writes Devanagari, no replacement characters.
+- [ ] Hindi selected with `small.en` shows `ERR` and creates no file.
 
 ## Commands
 
@@ -173,13 +178,13 @@ No build step. Reload the extension after changing `manifest.json` or the servic
 
 Config:
 
+- Copy `.env.example` to `.env`; the server loads it at startup and shell variables win
 - `ECHOSCRIBE_MODEL` default `small.en`; use `base.en` for speed or `small`/`medium` for multilingual
-- `ECHOSCRIBE_LANGUAGE` default `en`; use `auto` for Bangla or mixed lectures
+- `ECHOSCRIBE_LANGUAGE` default `en`; the panel selection overrides it; `auto` for Bangla or mixed lectures
 - `ECHOSCRIBE_DEVICE` default `cpu`; use `cuda` with a supported GPU
 - `ECHOSCRIBE_COMPUTE` default `int8` on CPU; use `float16` on GPU
 - `ECHOSCRIBE_DIR` default `~/EchoScribe`
 - `ECHOSCRIBE_PORT` default `8765`
-- `ECHOSCRIBE_SAVE_AUDIO` default `0`; debug only
 
 ## Conventions
 

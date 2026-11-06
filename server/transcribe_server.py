@@ -24,14 +24,29 @@ from faster_whisper import WhisperModel
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
 
+def load_env_file(path: Path) -> None:
+    """Fill os.environ from KEY=VALUE lines; real shell variables win."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+load_env_file(Path(__file__).resolve().parent.parent / ".env")
+
 HOST = "127.0.0.1"
 PORT = int(os.getenv("ECHOSCRIBE_PORT", "8765"))
 MODEL_NAME = os.getenv("ECHOSCRIBE_MODEL", "small.en")
 LANGUAGE = os.getenv("ECHOSCRIBE_LANGUAGE", "en")
 LANGUAGE = None if LANGUAGE.lower() == "auto" else LANGUAGE
+SUPPORTED_LANGUAGES = {"en", "hi"}
 DEVICE = os.getenv("ECHOSCRIBE_DEVICE", "cpu")
 COMPUTE_TYPE = os.getenv("ECHOSCRIBE_COMPUTE", "int8")
-BASE_DIR = Path(os.getenv("ECHOSCRIBE_DIR", Path.home() / "EchoScribe"))
+BASE_DIR = Path(os.getenv("ECHOSCRIBE_DIR", Path.home() / "EchoScribe")).expanduser()
 OUT_DIR = BASE_DIR / "transcripts"
 SAMPLE_RATE = 16000
 BYTES_PER_SECOND = SAMPLE_RATE * 2
@@ -64,23 +79,46 @@ def format_ts(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def resolve_language(
+    requested: str | None, model_name: str
+) -> tuple[str | None, str | None]:
+    """Return (language, error). A None language means the model detects it."""
+    code = (requested or "").strip().lower()
+    language = None if code in ("", "auto") else code
+
+    if language is not None and language not in SUPPORTED_LANGUAGES:
+        return None, f"Unsupported language {code!r}. Use en, hi, or auto."
+    if language not in (None, "en") and model_name.endswith(".en"):
+        return None, (
+            f"Model {model_name} supports English only. "
+            "Set ECHOSCRIBE_MODEL=small (multilingual) and restart the server."
+        )
+    return language, None
+
+
 @dataclass
 class TranscriptWriter:
     path: Path
     started_at: datetime = field(default_factory=datetime.now)
 
     @classmethod
-    def create(cls, title: str, source: str) -> TranscriptWriter:
+    def create(cls, title: str, source: str, language: str | None = None) -> TranscriptWriter:
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         safe_title = " ".join(title.split()) or "Lecture"
         safe_source = " ".join(source.split()) or "unknown"
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         path = OUT_DIR / f"{stamp}_{slugify(safe_title)}.md"
+        # Two starts inside one second would otherwise truncate the first transcript.
+        suffix = 2
+        while path.exists():
+            path = OUT_DIR / f"{stamp}_{slugify(safe_title)}-{suffix}.md"
+            suffix += 1
         writer = cls(path)
         path.write_text(
             f"# {safe_title}\n\n"
             f"Source: {safe_source}\n"
-            f"Started {writer.started_at.isoformat(timespec='seconds')}\n\n",
+            f"Started {writer.started_at.isoformat(timespec='seconds')}\n"
+            f"Language: {language or 'auto'} (model {MODEL_NAME})\n\n",
             encoding="utf-8",
         )
         return writer
@@ -89,10 +127,11 @@ class TranscriptWriter:
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(f"[{format_ts(offset)}] {text.strip()}\n")
 
-def transcribe_pcm(pcm: np.ndarray)-> list[tuple[float, float, str]]:
+def transcribe_pcm(pcm: np.ndarray, language: str | None) -> list[tuple[float, float, str]]:
     segments, _ = load_model().transcribe(
         pcm,
-        language=LANGUAGE,
+        language=language,
+        task="transcribe",  # Hindi must stay Hindi, never translated
         beam_size=1,
         vad_filter=True,
         condition_on_previous_text=False,
@@ -105,6 +144,7 @@ def transcribe_pcm(pcm: np.ndarray)-> list[tuple[float, float, str]]:
 class Session:
     writer: TranscriptWriter
     session_id: str
+    language: str | None = None
     buffer: bytearray = field(default_factory=bytearray)
     buffer_start: float = 0.0
     emitted_until: float = 0.0
@@ -129,7 +169,7 @@ class Session:
     async def _emit_window(self, websocket, size: int) -> None:
         chunk = bytes(self.buffer[:size])
         pcm = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
-        segments = await asyncio.to_thread(transcribe_pcm, pcm)
+        segments = await asyncio.to_thread(transcribe_pcm, pcm, self.language)
 
         for start, end, text in segments:
             text = text.strip()
@@ -203,16 +243,39 @@ async def handle_client(websocket) -> None:
                     if session is not None:
                         await session.flush(websocket)
                         SESSIONS.pop(session.session_id, None)
+                        session = None
 
                     if existing is None:
+                        language, error = resolve_language(
+                            data.get("language") or LANGUAGE, MODEL_NAME
+                        )
+                        if error is not None:
+                            await websocket.send(
+                                json.dumps(
+                                    {
+                                        "type": "error",
+                                        "code": "unsupported_language",
+                                        "message": error,
+                                    }
+                                )
+                            )
+                            continue
+
                         session = Session(
                             TranscriptWriter.create(
                                 data.get("title", "Lecture"),
                                 data.get("url", ""),
+                                language,
                             ),
                             session_id=session_id,
+                            language=language,
                         )
                         SESSIONS[session_id] = session
+                        # The only place the actual language is visible; wrong output starts here.
+                        print(
+                            f"[lang] {language or 'auto'} (model {MODEL_NAME})",
+                            flush=True,
+                        )
                         print(f"[file] new {session.writer.path}", flush=True)
                     else:
                         session = existing
@@ -225,6 +288,7 @@ async def handle_client(websocket) -> None:
                             {
                                 "type": "ready",
                                 "model": MODEL_NAME,
+                                "language": session.language,
                                 "sessionId": session_id,
                                 "resumed": existing is not None,
                             }
@@ -269,10 +333,11 @@ def transcribe_file(path: Path) -> None:
     segments, info = model.transcribe(
         str(path),
         language=LANGUAGE,
+        task="transcribe",  # Hindi must stay Hindi, never translated
         beam_size=1,
         vad_filter=True,
     )
-    writer = TranscriptWriter.create(path.stem, str(path))
+    writer = TranscriptWriter.create(path.stem, str(path), LANGUAGE)
     print(f"[file] {writer.path}", flush=True)
 
     for segment in segments:

@@ -56,10 +56,12 @@ Developer mode -> Load unpacked -> select the extension/ directory
 
 ## Configuration
 
+Copy `.env.example` to `.env` and edit; the server reads it at startup and shell variables win.
+
 | Variable | Default | Notes |
 |---|---|---|
 | `ECHOSCRIBE_MODEL` | `small.en` | `base.en` is faster; `small`/`medium` support other languages |
-| `ECHOSCRIBE_LANGUAGE` | `en` | `auto` for Bangla or mixed lectures |
+| `ECHOSCRIBE_LANGUAGE` | `en` | Default only; the side panel picks the language per session |
 | `ECHOSCRIBE_DEVICE` | `cpu` | `cuda` for a supported GPU |
 | `ECHOSCRIBE_COMPUTE` | `int8` | `float16` on GPU |
 | `ECHOSCRIBE_DIR` | `~/EchoScribe` | Transcript root |
@@ -71,6 +73,14 @@ Example for Bangla:
 ECHOSCRIBE_MODEL=small ECHOSCRIBE_LANGUAGE=auto uv run server/transcribe_server.py
 ```
 
+For Hindi, choose Hindi in the side panel and start the server with a multilingual model:
+
+```bash
+ECHOSCRIBE_MODEL=small uv run server/transcribe_server.py
+```
+
+The default `small.en` is English-only. Selecting Hindi with it fails with `ERR` and writes no file.
+
 ## Limits
 
 - Audio is sent only to `127.0.0.1`; nothing goes to a cloud service.
@@ -78,6 +88,6 @@ ECHOSCRIBE_MODEL=small ECHOSCRIBE_LANGUAGE=auto uv run server/transcribe_server.
 - Closing the lecture tab stops the session.
 - A dropped WebSocket reconnects and resumes the same transcript for up to 10 minutes.
 - A full server restart starts a new transcript file.
-- If the server is offline, audio queues for about 30 seconds; older frames drop first.
+- If the server is offline, the first start fails with `ERR` and captures nothing. A disconnect mid-session queues audio for about 30 seconds; older frames drop first.
 
 Use this for personal study. Respect course terms and copyright. Do not redistribute recordings or transcripts.
