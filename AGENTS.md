@@ -52,6 +52,7 @@ extension/
   pcm-worklet.js     Float32 -> Int16 PCM at 16 kHz
   sidepanel.html     live transcript UI
   sidepanel.js       renders segments, shows status
+  video-clock.js     reads player position, posts clock readings
 server/
   transcribe_server.py   WebSocket + faster-whisper + Markdown writer
   requirements.txt
@@ -84,15 +85,18 @@ Protocol:
 
 ```text
 client -> server: {"type":"start","sessionId":"...","title":"...","url":"...","sampleRate":16000,"language":"hi"}
+client -> server: {"type":"clock","video":754.2,"audio":61.5,"paused":false,"rate":1.0}
 client -> server: binary Int16 mono PCM frames
 client -> server: {"type":"stop"}
 
-server -> client: {"type":"ready","model":"small","language":"hi","device":"cuda","compute":"float16","sessionId":"...","resumed":false}
-server -> client: {"type":"segment","start":12.3,"end":16.8,"text":"..."}
+server -> client: {"type":"ready","model":"small","language":"hi","device":"cuda","compute":"float16","clock":"pending","sessionId":"...","resumed":false}
+server -> client: {"type":"segment","start":12.3,"end":16.8,"text":"...","clock":"video","video":754.2}
 server -> client: {"type":"error","code":"unsupported_language","message":"..."}
 ```
 
 Language: chosen per session in the side panel (`en` or `hi`). The server validates it before opening a file and refuses a non-English language when the model name ends in `.en`, so a mismatch never produces a transcript.
+
+Clock: `video-clock.js` is injected into the clicked tab and samples the player every 500 ms. Each reading is stamped with the audio position already sent, and the server maps segment offsets onto video time, so the transcript says where in the video a line was spoken. A rewind of 3 s or more adds `(replay from HH:MM:SS)`. With no readable player the header says `Clock: session` and timestamps are relative to the start of capture.
 
 Device: chosen at server start. `ECHOSCRIBE_DEVICE=cuda` loads the model, transcribes 1 s of silence, and only then binds the port. A missing CUDA library, absent GPU, bad precision, or out of memory exits with a named cause; it never falls back to CPU. Any transcription failure mid-session sends `{"code":"transcription_failed"}`, marks the session failed, and keeps the file written so far.
 
@@ -118,6 +122,7 @@ Permissions:
 - Step 3: add `tabCapture` and `offscreen`.
 - Step 4: add `sidePanel`.
 - Hindi: add `storage`; only `chrome.storage.session` is used, so the choice never touches disk.
+- Video clock: add `scripting`; one file is injected into the clicked tab, no host permissions.
 - Add `content_security_policy.extension_pages` with `connect-src ws://127.0.0.1:8765`.
 - No `downloads` or broad host permissions.
 
@@ -149,6 +154,8 @@ One step per turn. Do not start the next step until the test passes.
 - [ ] Hindi selected with `small.en` shows `ERR` and creates no file.
 - [ ] `ECHOSCRIBE_DEVICE=cuda` prints `[verify] 1.0 s ok` and the header records `device cuda/float16`.
 - [ ] A missing CUDA library exits with the library name and serves nothing.
+- [ ] Capture started at 12:30 writes `[00:12:30]` and the header says `Clock: video`.
+- [ ] A 10 s rewind marks the next lines `(replay from HH:MM:SS)`.
 
 ## Commands
 

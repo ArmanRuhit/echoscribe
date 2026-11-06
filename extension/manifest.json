@@ -4,7 +4,7 @@
     "version": "0.3.0",
     "description": "Live-transcribe the audio of a course video playing in this tab.",
     "minimum_chrome_version": "116",
-    "permissions": ["activeTab", "tabCapture", "offscreen", "sidePanel", "storage"],
+    "permissions": ["activeTab", "tabCapture", "offscreen", "sidePanel", "storage", "scripting"],
     "background": {
         "service_worker": "background.js"
     },

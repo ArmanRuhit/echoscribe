@@ -14,6 +14,11 @@ async function readLanguage() {
 
 async function clearSession(badge = "") {
     await chrome.action.setBadgeText({ text: badge });
+    try {
+        await chrome.runtime.sendMessage({ target: "clock", type: "CLOCK_STOP" });
+    } catch {
+        // no reporter in the tab
+    }
     if (await chrome.offscreen.hasDocument()) {
         await chrome.offscreen.closeDocument().catch(() => {});
     }
@@ -56,6 +61,16 @@ chrome.action.onClicked.addListener(async (tab) => {
         const streamId = await chrome.tabCapture.getMediaStreamId({
             targetTabId: tab.id
         });
+
+        // A missing player is not fatal: the server falls back to session time.
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ["video-clock.js"]
+            });
+        } catch (error) {
+            console.warn(`executeScript: ${error.message}`);
+        }
 
         await chrome.runtime.sendMessage({
             target: "offscreen",

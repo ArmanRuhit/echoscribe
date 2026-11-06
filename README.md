@@ -21,6 +21,7 @@ lecture tab audio
 - An AudioWorklet downmixes to mono and sends 100 ms PCM frames.
 - A local Python server transcribes 5-second windows and writes Markdown.
 - The side panel shows the live transcript.
+- Timestamps follow the video, not the session: `video-clock.js` samples the player every 500 ms, and a rewind of 3 s or more adds `(replay from HH:MM:SS)`. With no readable player the clock falls back to the session and the header says so.
 
 ## Requirements
 

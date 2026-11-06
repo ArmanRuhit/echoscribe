@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import ctypes
 import json
+import math
 import os
 import re
 import sysconfig
@@ -74,6 +75,10 @@ OVERLAP_SECONDS = 1.0
 WINDOW_BYTES = int(WINDOW_SECONDS * BYTES_PER_SECOND)
 NEED_BYTES = int((WINDOW_SECONDS + OVERLAP_SECONDS) * BYTES_PER_SECOND)
 SESSION_TTL_SECONDS = 10 * 60
+REPLAY_THRESHOLD = 3.0
+ANCHOR_STALE_SECONDS = 60.0
+ANCHOR_LIMIT = 64
+EXTRAPOLATE_LIMIT = 30.0
 
 MODEL: WhisperModel | None = None
 
@@ -203,6 +208,7 @@ def resolve_language(
 class TranscriptWriter:
     path: Path
     started_at: datetime = field(default_factory=datetime.now)
+    clock_written: bool = False
 
     @classmethod
     def create(cls, title: str, source: str, language: str | None = None) -> TranscriptWriter:
@@ -221,14 +227,31 @@ class TranscriptWriter:
             f"# {safe_title}\n\n"
             f"Source: {safe_source}\n"
             f"Started {writer.started_at.isoformat(timespec='seconds')}\n"
-            f"Language: {language or 'auto'} (model {MODEL_NAME}, device {DEVICE}/{COMPUTE_TYPE})\n\n",
+            f"Language: {language or 'auto'} (model {MODEL_NAME}, device {DEVICE}/{COMPUTE_TYPE})\n",
             encoding="utf-8",
         )
         return writer
 
-    def append(self, text: str, offset: float) -> None:
+    def append(
+        self,
+        text: str,
+        offset: float,
+        clock: str = "",
+        video: float | None = None,
+        replay_from: float | None = None,
+    ) -> None:
+        stamp = video if video is not None else offset
+        marker = f"(replay from {format_ts(replay_from)}) " if replay_from is not None else ""
         with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(f"[{format_ts(offset)}] {text.strip()}\n")
+            if clock and not self.clock_written:
+                # One header line records which clock the timestamps follow.
+                handle.write(f"\nClock: {clock}\n\n")
+                self.clock_written = True
+            handle.write(f"[{format_ts(stamp)}] {marker}{text.strip()}\n")
+
+    def note(self, text: str) -> None:
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n{text}\n")
 
 def is_speech(segment) -> bool:
     """Drop Whisper's silence hallucination; both signals must agree."""
@@ -287,6 +310,22 @@ def transcribe_pcm(pcm: np.ndarray, language: str | None) -> list[tuple[float, f
 
 
 @dataclass
+class Anchor:
+    """One (audio position, video position) reading from the page."""
+
+    audio: float
+    video: float
+    paused: bool = False
+    rate: float = 1.0
+
+
+@dataclass
+class Replay:
+    origin: float
+    until: float
+
+
+@dataclass
 class Session:
     writer: TranscriptWriter
     session_id: str
@@ -297,11 +336,63 @@ class Session:
     last_text: str = ""
     last_seen: float = field(default_factory=time.monotonic)
     failed: bool = False
+    anchors: list[Anchor] = field(default_factory=list)
+    max_video: float = -1.0
+    replay: Replay | None = None
+    clock_mode: str = "pending"
 
     def add(self, data: bytes) -> None:
         if self.failed:
             return
         self.buffer.extend(data)
+
+    def add_anchor(self, data: dict) -> None:
+        """Record where the video was at this audio offset; bad readings are dropped."""
+        try:
+            audio = float(data["audio"])
+            video = float(data["video"])
+            rate = float(data.get("rate", 1.0))
+        except (KeyError, TypeError, ValueError):
+            return
+        if not (math.isfinite(audio) and math.isfinite(video) and math.isfinite(rate)):
+            return
+        if not 0.25 <= rate <= 4.0:
+            return
+        if self.anchors and audio < self.anchors[-1].audio:
+            return
+
+        self.anchors.append(
+            Anchor(audio=audio, video=max(video, 0.0), paused=bool(data.get("paused")), rate=rate)
+        )
+        del self.anchors[:-ANCHOR_LIMIT]
+        newest = self.anchors[-1].audio
+        while self.anchors and newest - self.anchors[0].audio > ANCHOR_STALE_SECONDS:
+            self.anchors.pop(0)
+
+        # A new maximum far ahead of where we were means the user rewound.
+        if video < self.max_video - REPLAY_THRESHOLD:
+            self.replay = Replay(origin=video, until=self.max_video)
+        self.max_video = max(self.max_video, video)
+
+    def video_at(self, offset: float) -> float | None:
+        """Map an audio offset to video time, extrapolating past the newest anchor."""
+        if not self.anchors:
+            return None
+        chosen = None
+        for index, anchor in enumerate(self.anchors):
+            if anchor.audio > offset:
+                break
+            chosen = index
+        if chosen is None:
+            return max(self.anchors[0].video, 0.0)
+
+        anchor = self.anchors[chosen]
+        # Timers throttle in background tabs, so the newest reading can be old.
+        delta = min(max(0.0, offset - anchor.audio), EXTRAPOLATE_LIMIT)
+        video = anchor.video + (0.0 if anchor.paused else delta * anchor.rate)
+        if chosen + 1 < len(self.anchors):
+            video = min(video, self.anchors[chosen + 1].video)
+        return max(video, 0.0)
 
     async def process(self, websocket) -> None:
         while len(self.buffer) >= NEED_BYTES and not self.failed:
@@ -354,30 +445,49 @@ class Session:
             if global_end <= self.emitted_until + 0.05:
                 continue
 
+            video = self.video_at(self.buffer_start + start)
+            if self.clock_mode == "pending":
+                self.clock_mode = "video" if video is not None else "session"
+            elif self.clock_mode == "session" and video is not None:
+                # The player appeared after capture started; say where the clock came from.
+                self.clock_mode = "video"
+                self.writer.note(f"Clock: video from {format_ts(video)}")
+
+            replay_from = None
+            if self.replay is not None and video is not None:
+                if video >= self.replay.until:
+                    self.replay = None
+                else:
+                    replay_from = self.replay.origin
+
             key = normalize(text)
-            if key and key == self.last_text:
+            # A replayed passage must survive the duplicate guard; the earlier copy is valid.
+            if key and key == self.last_text and replay_from is None:
                 self.emitted_until = max(self.emitted_until, global_end)
                 continue
             self.last_text = key
 
-            self.writer.append(text, global_start)
+            self.writer.append(text, global_start, self.clock_mode, video, replay_from)
             self.emitted_until = max(self.emitted_until, global_end)
-            print(f"[{format_ts(global_start)}] {text}", flush=True)
+            shown = video if video is not None else global_start
+            print(f"[{format_ts(shown)}] {text}", flush=True)
 
             if websocket is None:
                 continue
 
+            frame = {
+                "type": "segment",
+                "start": round(global_start, 2),
+                "end": round(global_end, 2),
+                "text": text,
+                "clock": self.clock_mode,
+            }
+            if video is not None:
+                frame["video"] = round(video, 2)
+            if replay_from is not None:
+                frame["replayFrom"] = round(replay_from, 2)
             try:
-                await websocket.send(
-                    json.dumps(
-                        {
-                            "type": "segment",
-                            "start": round(global_start, 2),
-                            "end": round(global_end, 2),
-                            "text": text,
-                        }
-                    )
-                )
+                await websocket.send(json.dumps(frame))
             except ConnectionClosed:
                 pass
 
@@ -470,6 +580,7 @@ async def handle_client(websocket) -> None:
                                 "language": session.language,
                                 "device": DEVICE,
                                 "compute": COMPUTE_TYPE,
+                                "clock": "pending",
                                 "sessionId": session_id,
                                 "resumed": existing is not None,
                             }
@@ -482,6 +593,9 @@ async def handle_client(websocket) -> None:
                         print(f"[file] saved {session.writer.path}", flush=True)
                         session = None
                     await websocket.send(json.dumps({"type": "done"}))
+                elif kind == "clock":
+                    if session is not None:
+                        session.add_anchor(data)
                 else:
                     await websocket.send(
                         json.dumps({"type": "error", "message": f"unknown type {kind}"})

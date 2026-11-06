@@ -9,6 +9,7 @@ let sessionLanguage = "";
 let sessionModel = "";
 let sessionDevice = "";
 let sessionCompute = "";
+let sessionClock = "";
 
 void restoreLanguage();
 
@@ -46,11 +47,12 @@ chrome.runtime.onMessage.addListener((message) => {
     }
 });
 
-function setStatus({ state, title, message, language, model, device, compute }) {
+function setStatus({ state, title, message, language, model, device, compute, clock }) {
     if (language) sessionLanguage = language;
     if (model) sessionModel = model;
     if (device) sessionDevice = device;
     if (compute) sessionCompute = compute;
+    if (clock) sessionClock = clock;
 
     if (state === "recording") {
         statusEl.textContent = recordingLabel(title);
@@ -62,12 +64,14 @@ function setStatus({ state, title, message, language, model, device, compute }) 
         sessionModel = "";
         sessionDevice = "";
         sessionCompute = "";
+        sessionClock = "";
     } else {
         statusEl.textContent = "Stopped";
         sessionLanguage = "";
         sessionModel = "";
         sessionDevice = "";
         sessionCompute = "";
+        sessionClock = "";
     }
 }
 
@@ -89,7 +93,9 @@ function recordingLabel(title) {
             : sessionDevice
               ? " · CPU"
               : "";
-    return `Recording · ${LANGUAGES[sessionLanguage] || sessionLanguage} · ${sessionModel}${suffix}`;
+    const clock =
+        sessionClock === "video" || sessionClock === "session" ? ` · ${sessionClock}` : "";
+    return `Recording · ${LANGUAGES[sessionLanguage] || sessionLanguage} · ${sessionModel}${suffix}${clock}`;
 }
 
 function appendSegment(start, text) {

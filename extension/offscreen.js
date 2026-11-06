@@ -14,7 +14,9 @@ let sessionLanguage = "en";
 let sessionModel = "";
 let sessionDevice = "";
 let sessionCompute = "";
+let sessionClock = "";
 let readySeen = false;
+let samplesSent = 0;
 let droppedFrames = 0;
 const pending = [];
 const MAX_PENDING = 300;
@@ -33,6 +35,8 @@ chrome.runtime.onMessage.addListener((message) => {
         });
     } else if (message.type === "STOP") {
         void stop();
+    } else if (message.type === "VIDEO_CLOCK") {
+        sendClock(message);
     }
 });
 
@@ -44,9 +48,11 @@ async function start({ streamId, title, url, language }) {
     sessionModel = "";
     sessionDevice = "";
     sessionCompute = "";
+    sessionClock = "";
     stopping = false;
     readySeen = false;
     reconnectDelay = 1000;
+    samplesSent = 0;
     droppedFrames = 0;
     pending.length = 0;
 
@@ -128,6 +134,7 @@ function connectSocket() {
             sessionModel = data.model || "";
             sessionDevice = data.device || "";
             sessionCompute = data.compute || "";
+            sessionClock = data.clock || "pending";
             try {
                 await attachWorklet();
             } catch (error) {
@@ -144,7 +151,8 @@ function connectSocket() {
                 language: sessionLanguage,
                 model: sessionModel,
                 device: sessionDevice,
-                compute: sessionCompute
+                compute: sessionCompute,
+                clock: sessionClock
             });
             console.log(
                 "EchoScribe server ready:",
@@ -153,8 +161,14 @@ function connectSocket() {
                 data.resumed ? "(resumed)" : ""
             );
         } else if (data.type === "segment") {
+            if (data.clock) sessionClock = data.clock;
             console.log(`[${data.start.toFixed(1)}s] ${data.text}`);
-            sendPanel({ type: "SEGMENT", start: data.start, text: data.text });
+            sendPanel({
+                type: "SEGMENT",
+                start: data.video ?? data.start,
+                text: data.text,
+                replayFrom: data.replayFrom
+            });
         } else if (data.type === "error") {
             // After ready the only error is a failed transcription: the session is dead.
             await stop({
@@ -193,7 +207,8 @@ function scheduleReconnect() {
         language: sessionLanguage,
         model: sessionModel,
         device: sessionDevice,
-        compute: sessionCompute
+        compute: sessionCompute,
+        clock: sessionClock
     });
     console.warn(`EchoScribe server offline; retrying in ${reconnectDelay}ms`);
 
@@ -204,14 +219,34 @@ function scheduleReconnect() {
     }, reconnectDelay);
 }
 
+// Clock frames ride the audio clock; while audio is queued the anchor would point
+// at samples the server has not received yet, so those readings are dropped.
+function sendClock({ position, paused, rate }) {
+    if (!socketOpen || socket?.readyState !== WebSocket.OPEN || pending.length > 0) return;
+    socket.send(
+        JSON.stringify({
+            type: "clock",
+            video: position,
+            audio: samplesSent / 16000,
+            paused: Boolean(paused),
+            rate
+        })
+    );
+}
+
+function sendChunk(chunk) {
+    socket.send(chunk);
+    samplesSent += chunk.byteLength / 2;
+}
+
 function sendPcm(buffer) {
     if (socketOpen && socket?.readyState === WebSocket.OPEN) {
         while (pending.length > 0 && socket.bufferedAmount < MAX_SOCKET_BUFFER) {
-            socket.send(pending.shift());
+            sendChunk(pending.shift());
         }
 
         if (pending.length === 0 && socket.bufferedAmount < MAX_SOCKET_BUFFER) {
-            socket.send(buffer);
+            sendChunk(buffer);
             return;
         }
     }
