@@ -17,6 +17,7 @@ import re
 import sysconfig
 import time
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +51,7 @@ LANGUAGE = None if LANGUAGE.lower() == "auto" else LANGUAGE
 SUPPORTED_LANGUAGES = {"en", "hi"}
 SUPPORTED_DEVICES = ("cpu", "cuda")
 DEFAULT_COMPUTE = {"cpu": "int8", "cuda": "float16"}
+INITIAL_PROMPT = os.getenv("ECHOSCRIBE_PROMPT", "").strip() or None
 
 
 def resolve_device_config() -> tuple[str, str, str | None]:
@@ -228,6 +230,42 @@ class TranscriptWriter:
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(f"[{format_ts(offset)}] {text.strip()}\n")
 
+def is_speech(segment) -> bool:
+    """Drop Whisper's silence hallucination; both signals must agree."""
+    if segment.no_speech_prob > 0.6 and segment.avg_logprob < -0.5:
+        return False
+    if segment.compression_ratio > 2.4:
+        return False
+    # One word repeated three or more times is a decoder loop, not speech.
+    words = words_of(segment.text)
+    if len(words) >= 3:
+        most = max(Counter(words).values())
+        if most >= 3 and most / len(words) >= 0.6:
+            return False
+    return True
+
+
+def words_of(text: str) -> list[str]:
+    """Split on whitespace and punctuation, keeping Indic combining marks."""
+    return re.sub(r"[^\w\u0900-\u097F]+", " ", text.lower()).split()
+
+
+def normalize(text: str) -> str:
+    return " ".join(words_of(text))
+
+
+def merge_segments(segments: list[tuple[float, float, str]]) -> list[tuple[float, float, str]]:
+    """Join segments split by a short pause, so a sentence stays one line."""
+    merged: list[tuple[float, float, str]] = []
+    for start, end, text in segments:
+        if merged and start - merged[-1][1] < 0.6:
+            first, _, previous = merged[-1]
+            merged[-1] = (first, end, f"{previous} {text}")
+        else:
+            merged.append((start, end, text))
+    return merged
+
+
 def transcribe_pcm(pcm: np.ndarray, language: str | None) -> list[tuple[float, float, str]]:
     segments, _ = load_model().transcribe(
         pcm,
@@ -236,9 +274,16 @@ def transcribe_pcm(pcm: np.ndarray, language: str | None) -> list[tuple[float, f
         beam_size=1,
         vad_filter=True,
         condition_on_previous_text=False,
+        initial_prompt=INITIAL_PROMPT,
     )
 
-    return [(segment.start, segment.end, segment.text) for segment in segments]
+    return merge_segments(
+        [
+            (segment.start, segment.end, segment.text)
+            for segment in segments
+            if is_speech(segment) and segment.text.strip()
+        ]
+    )
 
 
 @dataclass
@@ -249,6 +294,7 @@ class Session:
     buffer: bytearray = field(default_factory=bytearray)
     buffer_start: float = 0.0
     emitted_until: float = 0.0
+    last_text: str = ""
     last_seen: float = field(default_factory=time.monotonic)
     failed: bool = False
 
@@ -302,11 +348,17 @@ class Session:
             text = text.strip()
             if not text:
                 continue
-            global_start = self.buffer_start + start
+            global_start = max(self.buffer_start + start, self.emitted_until)
             global_end = self.buffer_start + end
 
             if global_end <= self.emitted_until + 0.05:
                 continue
+
+            key = normalize(text)
+            if key and key == self.last_text:
+                self.emitted_until = max(self.emitted_until, global_end)
+                continue
+            self.last_text = key
 
             self.writer.append(text, global_start)
             self.emitted_until = max(self.emitted_until, global_end)
@@ -467,13 +519,14 @@ def transcribe_file(path: Path) -> None:
         task="transcribe",  # Hindi must stay Hindi, never translated
         beam_size=1,
         vad_filter=True,
+        initial_prompt=INITIAL_PROMPT,
     )
     writer = TranscriptWriter.create(path.stem, str(path), LANGUAGE)
     print(f"[file] {writer.path}", flush=True)
 
     for segment in segments:
         text = segment.text.strip()
-        if text:
+        if text and is_speech(segment):
             writer.append(text, segment.start)
             print(f"[{format_ts(segment.start)}] {text}", flush=True)
 

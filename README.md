@@ -66,6 +66,7 @@ Copy `.env.example` to `.env` and edit; the server reads it at startup and shell
 | `ECHOSCRIBE_COMPUTE` | follows device | `int8` on CPU, `float16` on GPU |
 | `ECHOSCRIBE_DIR` | `~/EchoScribe` | Transcript root |
 | `ECHOSCRIBE_PORT` | `8765` | Local WebSocket port |
+| `ECHOSCRIBE_PROMPT` | empty | Domain words Whisper mishears, e.g. `BODMAS, JSON` |
 
 Example for Bangla:
 

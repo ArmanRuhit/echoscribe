@@ -189,6 +189,7 @@ Config:
 - `ECHOSCRIBE_COMPUTE` default `int8` on CPU and `float16` on GPU; leave unset so it follows the device
 - `ECHOSCRIBE_DIR` default `~/EchoScribe`
 - `ECHOSCRIBE_PORT` default `8765`
+- `ECHOSCRIBE_PROMPT` default empty; domain words to bias decoding (`BODMAS, JSON, system prompt`)
 
 ## Conventions
 
