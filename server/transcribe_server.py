@@ -323,6 +323,7 @@ class Anchor:
 class Replay:
     origin: float
     until: float
+    at_audio: float
 
 
 @dataclass
@@ -370,8 +371,10 @@ class Session:
             self.anchors.pop(0)
 
         # A new maximum far ahead of where we were means the user rewound.
+        # Only the landing point of a rewind opens a replay; later readings must not move it.
         if video < self.max_video - REPLAY_THRESHOLD:
-            self.replay = Replay(origin=video, until=self.max_video)
+            if self.replay is None or video < self.replay.origin - REPLAY_THRESHOLD:
+                self.replay = Replay(origin=video, until=self.max_video, at_audio=audio)
         self.max_video = max(self.max_video, video)
 
     def video_at(self, offset: float) -> float | None:
@@ -455,7 +458,11 @@ class Session:
 
             replay_from = None
             if self.replay is not None and video is not None:
-                if video >= self.replay.until:
+                if self.buffer_start + start < self.replay.at_audio:
+                    # This window straddles the rewind: it was spoken at the landing point.
+                    video = self.replay.origin
+                    replay_from = self.replay.origin
+                elif video >= self.replay.until:
                     self.replay = None
                 else:
                     replay_from = self.replay.origin
